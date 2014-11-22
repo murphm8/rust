@@ -286,6 +286,8 @@ pub struct TestOpts {
     pub logfile: Option<Path>,
     pub nocapture: bool,
     pub color: ColorConfig,
+    pub show_error_bar: bool,
+    pub show_all_stats: bool,
 }
 
 impl TestOpts {
@@ -303,6 +305,8 @@ impl TestOpts {
             logfile: None,
             nocapture: false,
             color: AutoColor,
+            show_error_bar: false,
+            show_all_stats: false,
         }
     }
 }
@@ -333,7 +337,9 @@ fn optgroups() -> Vec<getopts::OptGroup> {
       getopts::optopt("", "color", "Configure coloring of output:
             auto   = colorize if stdout is a tty and tests are run on serially (default);
             always = always colorize output;
-            never  = never colorize output;", "auto|always|never"))
+            never  = never colorize output;", "auto|always|never"),
+      getopts::optflag("", "error-bar", "Display error bars for the benchmarks"),
+      getopts::optflag("", "stats", "Display the benchmark min, max, and quartiles"))
 }
 
 fn usage(binary: &str) {
@@ -424,6 +430,9 @@ pub fn parse_opts(args: &[String]) -> Option<OptRes> {
                                             v))),
     };
 
+    let show_error_bar = matches.opt_present("error-bar");
+    let show_all_stats = matches.opt_present("stats");
+
     let test_opts = TestOpts {
         filter: filter,
         run_ignored: run_ignored,
@@ -436,6 +445,8 @@ pub fn parse_opts(args: &[String]) -> Option<OptRes> {
         logfile: logfile,
         nocapture: nocapture,
         color: color,
+        show_error_bar: show_error_bar,
+        show_all_stats: show_all_stats,
     };
 
     Some(Ok(test_opts))
@@ -486,6 +497,8 @@ struct ConsoleTestState<T> {
     log_out: Option<File>,
     out: OutputLocation<T>,
     use_color: bool,
+    show_error_bar: bool,
+    show_all_stats: bool,
     total: uint,
     passed: uint,
     failed: uint,
@@ -512,6 +525,8 @@ impl<T: Writer> ConsoleTestState<T> {
             out: out,
             log_out: log_out,
             use_color: use_color(opts),
+            show_error_bar: opts.show_error_bar,
+            show_all_stats: opts.show_all_stats,
             total: 0u,
             passed: 0u,
             failed: 0u,
@@ -607,8 +622,31 @@ impl<T: Writer> ConsoleTestState<T> {
             }
             TrBench(ref bs) => {
                 try!(self.write_bench());
-                self.write_plain(format!(": {}",
-                                         fmt_bench_samples(bs)).as_slice())
+
+                if self.show_error_bar {
+                    let mut wr = Vec::new();
+
+                    try!(stats::write_boxplot(&mut wr, &bs.ns_iter_summ, 50));
+
+                    let s = String::from_utf8(wr).unwrap();
+
+                    try!(self.write_plain(format!(": {}", s).as_slice()));
+                }
+
+                if self.show_all_stats {
+                    let mut wr = Vec::new();
+
+                    try!(stats::write_5_number_summary(&mut wr, &bs.ns_iter_summ));
+
+                    let s = String::from_utf8(wr).unwrap();
+
+                    try!(self.write_plain(format!(": {}", s).as_slice()));
+                } else {
+                    try!(self.write_plain(format!(": {}",
+                                                  fmt_bench_samples(bs)).as_slice()));
+                }
+
+                Ok(())
             }
         });
         self.write_plain("\n")
