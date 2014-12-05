@@ -286,7 +286,8 @@ pub struct TestOpts {
     pub logfile: Option<Path>,
     pub nocapture: bool,
     pub color: ColorConfig,
-    pub show_error_bar: bool,
+    pub show_boxplot: bool,
+    pub boxplot_width: uint,
     pub show_all_stats: bool,
 }
 
@@ -305,7 +306,8 @@ impl TestOpts {
             logfile: None,
             nocapture: false,
             color: AutoColor,
-            show_error_bar: false,
+            show_boxplot: false,
+            boxplot_width: 50,
             show_all_stats: false,
         }
     }
@@ -338,7 +340,8 @@ fn optgroups() -> Vec<getopts::OptGroup> {
             auto   = colorize if stdout is a tty and tests are run on serially (default);
             always = always colorize output;
             never  = never colorize output;", "auto|always|never"),
-      getopts::optflag("", "error-bar", "Display error bars for the benchmarks"),
+      getopts::optflag("", "boxplot", "Display a boxplot of the benchmark statistics"),
+      getopts::optopt("", "boxplot-width", "Set the boxplot width (default 50)", "WIDTH"),
       getopts::optflag("", "stats", "Display the benchmark min, max, and quartiles"))
 }
 
@@ -430,7 +433,19 @@ pub fn parse_opts(args: &[String]) -> Option<OptRes> {
                                             v))),
     };
 
-    let show_error_bar = matches.opt_present("error-bar");
+    let show_boxplot = matches.opt_present("boxplot");
+    let boxplot_width = match matches.opt_str("boxplot-width") {
+        Some(width) => {
+            match FromStr::from_str(width.as_slice()) {
+                Some(width) => width,
+                None => {
+                    return Some(Err(format!("argument for --boxplot-width must be a uint")));
+                }
+            }
+        }
+        None => 50,
+    };
+
     let show_all_stats = matches.opt_present("stats");
 
     let test_opts = TestOpts {
@@ -445,7 +460,8 @@ pub fn parse_opts(args: &[String]) -> Option<OptRes> {
         logfile: logfile,
         nocapture: nocapture,
         color: color,
-        show_error_bar: show_error_bar,
+        show_boxplot: show_boxplot,
+        boxplot_width: boxplot_width,
         show_all_stats: show_all_stats,
     };
 
@@ -497,7 +513,8 @@ struct ConsoleTestState<T> {
     log_out: Option<File>,
     out: OutputLocation<T>,
     use_color: bool,
-    show_error_bar: bool,
+    show_boxplot: bool,
+    boxplot_width: uint,
     show_all_stats: bool,
     total: uint,
     passed: uint,
@@ -525,7 +542,8 @@ impl<T: Writer> ConsoleTestState<T> {
             out: out,
             log_out: log_out,
             use_color: use_color(opts),
-            show_error_bar: opts.show_error_bar,
+            show_boxplot: opts.show_boxplot,
+            boxplot_width: opts.boxplot_width,
             show_all_stats: opts.show_all_stats,
             total: 0u,
             passed: 0u,
@@ -623,10 +641,10 @@ impl<T: Writer> ConsoleTestState<T> {
             TrBench(ref bs) => {
                 try!(self.write_bench());
 
-                if self.show_error_bar {
+                if self.show_boxplot {
                     let mut wr = Vec::new();
 
-                    try!(stats::write_boxplot(&mut wr, &bs.ns_iter_summ, 50));
+                    try!(stats::write_boxplot(&mut wr, &bs.ns_iter_summ, self.boxplot_width));
 
                     let s = String::from_utf8(wr).unwrap();
 
